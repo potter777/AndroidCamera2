@@ -5,6 +5,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -13,6 +14,7 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureFailure;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.TotalCaptureResult;
+import android.hardware.camera2.params.StreamConfigurationMap;
 import android.os.Bundle;
 import android.os.Handler;
 import android.support.annotation.NonNull;
@@ -20,6 +22,7 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
+import android.util.Size;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -43,13 +46,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     Button mBtnTakePicture;
 
     // camera
-    CameraManager mCameraManager;
-    CameraSettings mSettings;
-    String mCCameraId;
-    CameraDevice mCamera;
-    CameraCaptureSession mCameraSession;
-    String[] mCameras;
-    Handler mHandler;
+    private CameraManager mCameraManager;
+    private CameraSettings mSettings;
+    private String mCCameraId;
+    private boolean mIsFlashAvailable;
+    private CameraDevice mCamera;
+    private CameraCaptureSession mCameraSession;
+    private String[] mCameras;
+    private Handler mHandler;
 
     CameraDevice.StateCallback mCameraStateCallback = new CameraDevice.StateCallback() {
         @Override
@@ -115,31 +119,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        mCameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
 
         // binding views
         bindViews();
-        mSurfaceView = findViewById(R.id.surfaceView);
-
-        // setting objects
-        mCameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
-
-        mSurfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
-            @Override
-            public void surfaceCreated(SurfaceHolder holder) {
-                initialSetup();
-                openCamera(mCCameraId);
-            }
-
-            @Override
-            public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-
-            }
-
-            @Override
-            public void surfaceDestroyed(SurfaceHolder holder) {
-
-            }
-        });
     }
 
     @Override
@@ -184,12 +167,28 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     void bindViews() {
+        mSurfaceView = findViewById(R.id.surfaceView);
         mBtnFlash = findViewById(R.id.icFlash);
         mBtnCameraSide = findViewById(R.id.icCameraSide);
         mBtnTakePicture = findViewById(R.id.btnTakePhoto);
         mBtnFlash.setOnClickListener(this);
         mBtnCameraSide.setOnClickListener(this);
         mBtnTakePicture.setOnClickListener(this);
+
+        // setting objects
+        mSurfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
+            @Override
+            public void surfaceCreated(SurfaceHolder holder) {
+                initialSetup();
+                openCamera(mCCameraId);
+            }
+
+            @Override
+            public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {}
+
+            @Override
+            public void surfaceDestroyed(SurfaceHolder holder) {}
+        });
     }
 
     /**
@@ -226,6 +225,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 mCCameraId = mSettings.getCamera();
             }
 
+            mIsFlashAvailable = isFlashAvailable(mCCameraId);
+
         } catch (CameraAccessException e) {
             Log.e(TAG, "" + e.getMessage());
         }
@@ -239,7 +240,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     @SuppressLint("MissingPermission")
     void openCamera(String cameraId) {
         Log.i(TAG, "openCamera()");
-
+        logCharacteristics(cameraId);
         if (!hasCameraPermission()) {
             requestCameraPermission();
             return;
@@ -273,6 +274,25 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
 
         return null;
+    }
+
+    /**
+     * Evalua si es posible utilizar el flash
+     * @param cameraId identificador de la camara
+     * @return Verdadero cuando se pueda utilizar el flash
+     */
+    boolean isFlashAvailable (String cameraId) {
+
+        if (mCameraManager == null) throw new IllegalStateException("Camera manager is not available");
+
+        try {
+            CameraCharacteristics ch = mCameraManager.getCameraCharacteristics(cameraId);
+            Boolean isAvailable = ch.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+            return isAvailable != null && isAvailable;
+        } catch (CameraAccessException e) {
+            Log.e(TAG, e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -334,4 +354,24 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             mStore.edit().putString(KEY_CAMERA, mCamera).apply();
         }
     }
+
+    void logCharacteristics(String cameraId) {
+        try {
+            CameraCharacteristics ch = mCameraManager.getCameraCharacteristics(cameraId);
+            Log.i(TAG,"flash info available: " + ch.get(CameraCharacteristics.FLASH_INFO_AVAILABLE));
+            StreamConfigurationMap scm = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            if (scm != null) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    Size[] sizes = scm.getHighResolutionOutputSizes(ImageFormat.JPEG);
+                    Log.i(TAG, "--------- High Resolution Output Sizes ---------");
+                    for (Size size: sizes) {
+                        Log.i(TAG, "Size: " + size.getWidth() + "w " + size.getHeight() + "h");
+                    }
+                }
+            }
+        } catch (CameraAccessException e) {
+            Log.e(TAG, e.getMessage());
+        }
+    }
+
 }
