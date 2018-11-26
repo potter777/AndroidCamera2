@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
+import android.graphics.drawable.Drawable;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -17,6 +18,7 @@ import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
@@ -49,21 +51,29 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private CameraManager mCameraManager;
     private CameraSettings mSettings;
     private String mCCameraId;
+    private CameraSide mCCameraSide;
     private boolean mIsFlashAvailable;
     private CameraDevice mCamera;
     private CameraCaptureSession mCameraSession;
     private String[] mCameras;
     private Handler mHandler;
+    private HandlerThread mHandlerThread;
+
+    enum CameraSide {
+        REAR,
+        FRONTAL
+    }
 
     CameraDevice.StateCallback mCameraStateCallback = new CameraDevice.StateCallback() {
         @Override
         public void onOpened(@NonNull CameraDevice camera) {
-            mCamera = camera;
             Log.i(TAG, "camera is open");
+            mCamera = camera;
+            configureUXCurrentCamera(mCCameraSide);
             try {
                 mCamera.createCaptureSession(
                         Collections.singletonList(mSurfaceView.getHolder().getSurface()),
-                        mCameraCaptureSessionCallback,
+                        mSessionStateCallback,
                         mHandler
                 );
             } catch (CameraAccessException e) {
@@ -73,7 +83,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         @Override
         public void onDisconnected(@NonNull CameraDevice camera) {
-
+            Log.i(TAG, "camera was closed");
         }
 
         @Override
@@ -82,14 +92,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
     };
 
-    CameraCaptureSession.StateCallback mCameraCaptureSessionCallback = new CameraCaptureSession.StateCallback() {
+    CameraCaptureSession.StateCallback mSessionStateCallback = new CameraCaptureSession.StateCallback() {
         @Override
         public void onConfigured(@NonNull CameraCaptureSession session) {
             try {
                 Log.i(TAG, "session is configured");
                 CaptureRequest.Builder builder = mCamera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
                 builder.addTarget(mSurfaceView.getHolder().getSurface());
-                session.setRepeatingRequest(builder.build(), mCameraCaptureCallback, mHandler);
+                session.setRepeatingRequest(builder.build(), mSessionCaptureCallback, mHandler);
             } catch (CameraAccessException e) {
                 Log.e(TAG, "" + e.getMessage());
             }
@@ -101,7 +111,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
     };
 
-    CameraCaptureSession.CaptureCallback mCameraCaptureCallback = new CameraCaptureSession.CaptureCallback() {
+    CameraCaptureSession.CaptureCallback mSessionCaptureCallback = new CameraCaptureSession.CaptureCallback() {
         @Override
         public void onCaptureCompleted(@NonNull CameraCaptureSession session,
                                        @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
@@ -120,6 +130,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         mCameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
+        /* Esto permite ejecutar los procesos en un hilo separado al de UI */
+        mHandlerThread = new HandlerThread("camera_process");
+        mHandlerThread.start();
+        mHandler = new Handler(mHandlerThread.getLooper());
+        /* ***** ***** ***** */
 
         // binding views
         bindViews();
@@ -135,6 +150,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         super.onStop();
         if (mCamera != null) {
             mCamera.close();
+            mHandlerThread.quitSafely();
         }
     }
 
@@ -158,7 +174,19 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 break;
             case R.id.icCameraSide:
                 if (mCamera != null) {
-                    mCamera.close();
+                    mHandler.post(() -> {
+                       mCamera.close();
+                       String cameraId;
+
+                       if (mCCameraSide == CameraSide.FRONTAL) {
+                           cameraId = getRearCamera();
+                       }else{
+                           cameraId = getFrontalCamera();
+                       }
+
+                       openCamera(cameraId);
+                       mSettings.setCamera(cameraId);
+                    });
                 }
                 break;
             case R.id.btnTakePhoto:
@@ -167,6 +195,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     void bindViews() {
+
         mSurfaceView = findViewById(R.id.surfaceView);
         mBtnFlash = findViewById(R.id.icFlash);
         mBtnCameraSide = findViewById(R.id.icCameraSide);
@@ -223,6 +252,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 mSettings.setCamera(mCCameraId);
             } else {
                 mCCameraId = mSettings.getCamera();
+            }
+
+            if (mCCameraId.equals(getFrontalCamera())) {
+                mCCameraSide = CameraSide.FRONTAL;
+            }else{
+                mCCameraSide = CameraSide.REAR;
             }
 
             mIsFlashAvailable = isFlashAvailable(mCCameraId);
@@ -300,6 +335,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
      * @return id de la camara frontal
      */
     String getFrontalCamera() {
+        mCCameraSide = CameraSide.FRONTAL;
         return selectCameraSide(CameraCharacteristics.LENS_FACING_FRONT);
     }
 
@@ -307,6 +343,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
      * @return id de la camara trasera
      */
     String getRearCamera() {
+        mCCameraSide = CameraSide.REAR;
         return selectCameraSide(CameraCharacteristics.LENS_FACING_BACK);
     }
 
@@ -372,6 +409,25 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         } catch (CameraAccessException e) {
             Log.e(TAG, e.getMessage());
         }
+    }
+
+    /**
+     * Configura la interfaz de usuario según la camara que se haya seleccionado
+     * @param cameraSide lado de la camara actual.
+     */
+    void configureUXCurrentCamera(CameraSide cameraSide) {
+        runOnUiThread(() -> {
+            Drawable drawable = null;
+            switch (cameraSide) {
+                case REAR:
+                    drawable = ContextCompat.getDrawable(MainActivity.this, R.drawable.ic_camera_front_24dp);
+                    break;
+                case FRONTAL:
+                    drawable = ContextCompat.getDrawable(MainActivity.this, R.drawable.ic_camera_rear_24dp);
+                    break;
+            }
+            mBtnCameraSide.setImageDrawable(drawable);
+        });
     }
 
 }
