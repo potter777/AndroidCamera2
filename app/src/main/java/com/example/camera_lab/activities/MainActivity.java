@@ -48,11 +48,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     Button mBtnTakePicture;
 
     // camera
+    // prefix "C" = current
     private CameraManager mCameraManager;
     private CameraSettings mSettings;
     private String mCCameraId;
     private CameraSide mCCameraSide;
     private boolean mIsFlashAvailable;
+    private FlashOption mCFlashOption;
     private CameraDevice mCamera;
     private CameraCaptureSession mCameraSession;
     private String[] mCameras;
@@ -62,6 +64,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     enum CameraSide {
         REAR,
         FRONTAL
+    }
+
+    enum FlashOption {
+        AUTOMATIC,
+        DISABLED,
+        ENABLED
     }
 
     CameraDevice.StateCallback mCameraStateCallback = new CameraDevice.StateCallback() {
@@ -250,8 +258,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             if (mSettings.isFirstTime()) {
                 mCCameraId = getRearCamera();
                 mSettings.setCamera(mCCameraId);
+                mCFlashOption = FlashOption.DISABLED;
+                mSettings.setFlash(FlashOption.DISABLED.toString());
             } else {
                 mCCameraId = mSettings.getCamera();
+                mCFlashOption = FlashOption.valueOf(mSettings.getCamera());
             }
 
             if (mCCameraId.equals(getFrontalCamera())) {
@@ -260,7 +271,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 mCCameraSide = CameraSide.REAR;
             }
 
-            mIsFlashAvailable = isFlashAvailable(mCCameraId);
 
         } catch (CameraAccessException e) {
             Log.e(TAG, "" + e.getMessage());
@@ -363,6 +373,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         private static final String PREFERENCES = "camera_preferences";
         private static final String KEY_CAMERA = "camera_side";
+        private static final String KEY_FLASH = "camera_flash";
 
         private Context mContext;
 
@@ -389,6 +400,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         void setCamera(String mCamera) {
             mStore.edit().putString(KEY_CAMERA, mCamera).apply();
+        }
+
+        String getFlash() {
+            // AUTOMATIC es parte del enum para la actividad de camara
+            return mStore.getString(KEY_CAMERA, "AUTOMATIC");
+        }
+
+        void setFlash(String flashOption) {
+            mStore.edit().putString(KEY_FLASH, flashOption).apply();
         }
     }
 
